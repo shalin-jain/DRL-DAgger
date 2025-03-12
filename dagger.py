@@ -59,10 +59,6 @@ def visualize_expert(ppo_model, env, episodes=3, gif_filename="ppo_expert.gif"):
 
 
 def evaluate_expert_rewards(ppo_model, env, n_episodes=50):
-    """
-    使用训练好的 PPO 专家在环境中运行多个 episode，
-    返回每个 episode 的总奖励列表，并绘制奖励曲线。
-    """
     rewards = []
     for episode in range(n_episodes):
         obs = env.reset()
