@@ -43,8 +43,9 @@ def expert_policy(observation):
        return [0, 0, 1, 0]
     
     # stop horizontal drive
-    if abs(x) > 0.1:
-        if x > 0:
+    pid_input = x + 2 * x_vel
+    if abs(pid_input) > 0.3:
+        if pid_input > 0:
             action = [0, 1, 0, 0]  # push right
         else:
             action = [0, 0, 0, 1]  # push left
