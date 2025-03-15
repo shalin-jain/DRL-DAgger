@@ -14,7 +14,9 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 
 
 def train_ppo_expert(env_id="LunarLander-v2", total_timesteps=200000):
+
     """Helper function to train a PPO expert using Stable Baselines"""
+
     save_path = "ppo_expert.zip"
     if os.path.exists(save_path):
         print(f"Loading pre-trained PPO model from {save_path}")
@@ -30,7 +32,9 @@ def train_ppo_expert(env_id="LunarLander-v2", total_timesteps=200000):
 
 
 def expert_policy_ppo(observation, ppo_model):
+
     """Call the trained PPO stable baselines expert"""
+
     obs = np.array(observation)
     if len(obs.shape) == 1:
         obs = obs.reshape(1, -1)
@@ -39,7 +43,9 @@ def expert_policy_ppo(observation, ppo_model):
 
 
 def visualize_expert(ppo_model, env, episodes=3, gif_filename="ppo_expert.gif"):
+
     """Visualize the trained PPO stable baselines expert"""
+
     frames = []
     for episode in range(episodes):
         obs = env.reset()
@@ -62,7 +68,9 @@ def visualize_expert(ppo_model, env, episodes=3, gif_filename="ppo_expert.gif"):
 
 
 def evaluate_expert_rewards(ppo_model, env, n_episodes=50):
+
     """Evaluate the trained PPO stable baselines expert"""
+
     rewards = []
     for episode in range(n_episodes):
         obs = env.reset()
@@ -89,7 +97,6 @@ def evaluate_expert_rewards(ppo_model, env, n_episodes=50):
 
 
 class Policy(nn.Module):
-    """Policy Network"""
 
     def __init__(self, input_dim, output_dim):
         super().__init__()
@@ -107,11 +114,14 @@ def dagger(
     env,
     policy,
     expert_policy_fn,
+
     expert_model,
+
     iterations=500,
     rollout_length=100,
     batch_size=64,
     lr=1e-3,
+
     update_steps=5
 ):
     """
@@ -147,6 +157,7 @@ def dagger(
         done = False
         env_steps = 0
         while not done and env_steps < rollout_length:
+
             obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)
             logits = policy(obs_tensor)
             pred_action = torch.argmax(logits, dim=1).item()
@@ -156,6 +167,7 @@ def dagger(
             dataset.append((obs, expert_action))    # add labeled action to dataset
 
             # step environment
+
             obs, reward, done, _, _ = env.step(pred_action)
             episode_return += reward
             env_steps += 1
@@ -193,6 +205,7 @@ def dagger(
     plt.figure()
     plt.plot(losses)
     plt.xlabel("Update Steps")
+
     plt.ylabel("Loss")
     plt.title("DAgger Training Loss")
     plt.savefig("dagger_training_loss.png")
@@ -209,6 +222,7 @@ def dagger(
 
 
 def evaluate_policy(env, policy, episodes=50, vis_episodes=0, gif_filename='dagger_policy.gif'):
+
     frames = []
     rewards = []
     for episode in range(episodes):
@@ -227,6 +241,7 @@ def evaluate_policy(env, policy, episodes=50, vis_episodes=0, gif_filename='dagg
             action = torch.argmax(logits, dim=1).item()
             obs, reward, done, _, _ = env.step(action)
             total_reward += reward
+
         rewards.append(total_reward)
         print(f"DAgger Policy Episode {episode+1}: Total Reward = {total_reward}")
     
@@ -257,7 +272,7 @@ if __name__ == "__main__":
     np.random.seed(0)
 
     env = gym.make("LunarLander-v2", render_mode="rgb_array")
-
+    
     print("Training PPO expert...")
     ppo_expert = train_ppo_expert(env_id="LunarLander-v2", total_timesteps=200000)
 
