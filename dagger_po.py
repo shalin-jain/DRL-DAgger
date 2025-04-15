@@ -18,6 +18,11 @@ EPISODE_LENGTH = 500
 DROPOUT_RATE = 0.0  # probability with which observations are zero-ed out
 DROPOUT_MASK = np.array([1, 1, 1, 1, 1, 1, 1, 1])   # valid observation indices to apply dropout on
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+RANDOM_SEED = 0
+np.random.seed(RANDOM_SEED)
+torch.manual_seed(RANDOM_SEED)
+torch.cuda.manual_seed(RANDOM_SEED)
+torch.cuda.manual_seed_all(RANDOM_SEED)
 
 
 class EnvWrapper():
@@ -197,6 +202,7 @@ def plot_training_stats(loss_history, return_history):
     axs[1].set_ylabel("Return")
     axs[1].set_xlabel("Epoch")
     axs[1].legend()
+    print('*' * 20)
 
     plt.suptitle("DAgger Training Progress")
     plt.tight_layout()
@@ -206,7 +212,11 @@ def plot_training_stats(loss_history, return_history):
 def plot_returns(expert_returns, dagger_returns):
     """Compare DAgger policy performance to expert"""
 
-    plt.figure(figsize=(10, 6))
+
+    np.save('expert_returns.npy', expert_returns)
+    np.save('dagger_returns.npy', dagger_returns)
+
+    # plt.figure(figsize=(10, 6))
     plt.plot(expert_returns, label="PPO Expert", color="blue", linestyle="--")
     plt.plot(dagger_returns, label="DAgger policy", color="green")
     plt.xlabel("Episode")
