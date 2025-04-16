@@ -251,7 +251,7 @@ def evaluate_policy(env, policy_fn, episodes=10, silent=False, visualize=False, 
             if isinstance(policy_fn, PPO):
                 action, _ = policy_fn.predict(obs)
             elif isinstance(policy_fn, MLPPolicy):
-                obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)
+                obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(DEVICE)
                 logits = policy_fn(obs_tensor)
                 action = torch.argmax(logits, dim=1).item()
             else:
