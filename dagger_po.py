@@ -19,7 +19,9 @@ DROPOUT_RATE = 0.0  # probability with which observations are zero-ed out
 DROPOUT_MASK = np.array([1, 1, 1, 1, 1, 1, 1, 1])   # valid observation indices to apply dropout on
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 RANDOM_SEED = 0
-TRAIN_NEW_POLICY = True
+TRAIN_NEW_GRU_POLICY = True
+TRAIN_NEW_MLP_POLICY = True
+TRAIN_NEW_EXPERT_POLICY = True
 np.random.seed(RANDOM_SEED)
 torch.manual_seed(RANDOM_SEED)
 torch.cuda.manual_seed(RANDOM_SEED)
@@ -310,12 +312,11 @@ def plot_returns(expert_returns, dagger_returns, dagger_baseline_returns):
 if __name__ == "__main__":
     env = gym.make("LunarLander-v2")
     wrapped_env = EnvWrapper(env, DROPOUT_RATE, DROPOUT_MASK)
-
+    
     print("Training PPO Expert...")
     expert_model = train_ppo_expert()
 
-    if TRAIN_NEW_POLICY:
-
+    if TRAIN_NEW_GRU_POLICY:
 
         print("Training DAgger policy...")
         dagger_model = train_dagger(wrapped_env, expert_model)
@@ -323,6 +324,13 @@ if __name__ == "__main__":
         print("Saving DAgger policy...")
         save_path = "dagger_lunarlander_gru.pt"
         torch.save(dagger_model.state_dict(), save_path)
+    else:
+        print("Loading DAgger policy")
+        dagger_model = GRUPolicy(env.observation_space.shape[0], env.action_space.n).to(DEVICE)
+        dagger_model.load_state_dict(torch.load('dagger_lunarlander_gru.pt', map_location=DEVICE))
+
+    
+    if TRAIN_NEW_MLP_POLICY:
 
         print("Training DAgger policy (MLP)...")
         dagger_model_baseline = train_dagger_baseline(wrapped_env, expert_model)
@@ -331,13 +339,7 @@ if __name__ == "__main__":
         save_path = "dagger_lunarlander_mlp.pt"
         torch.save(dagger_model_baseline.state_dict(), save_path)
 
-        
-    
     else:
-        print("Loading DAgger policy")
-        dagger_model = GRUPolicy(env.observation_space.shape[0], env.action_space.n).to(DEVICE)
-        dagger_model.load_state_dict(torch.load('dagger_lunarlander_gru.pt', map_location=DEVICE))
-
         print("Loading DAgger policy (baseline)")
         dagger_model_baseline = MLPPolicy(env.observation_space.shape[0], env.action_space.n).to(DEVICE)
         dagger_model_baseline.load_state_dict(torch.load('dagger_lunarlander_mlp.pt', map_location=DEVICE))
