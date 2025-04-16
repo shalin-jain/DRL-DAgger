@@ -86,7 +86,10 @@ def train_ppo_expert(env_id="LunarLander-v2", total_timesteps=200_000):
     save_path = "ppo_expert.zip"
     
     if os.path.exists(save_path):
+        print('Expert exists')
         return PPO.load(save_path)
+    else:
+        print('Expert not found. Start training expert.')
     
     env = DummyVecEnv([lambda: gym.make(env_id)])
     model = PPO("MlpPolicy", env, verbose=1)
@@ -196,7 +199,7 @@ def train_dagger_baseline(env, expert, epochs=TOTAL_EPOCHS):
             act_batch = torch.tensor(np.array([dataset[i][1] for i in batch_indices]), dtype=torch.long).to(DEVICE)
 
             obs_batch = obs_batch
-            pred_actions, _ = policy(obs_batch)
+            pred_actions = policy(obs_batch)
             loss = nn.CrossEntropyLoss()(pred_actions, act_batch)
 
             optimizer.zero_grad()
