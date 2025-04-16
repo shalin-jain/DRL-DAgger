@@ -19,7 +19,7 @@ DROPOUT_RATE = 0.0  # probability with which observations are zero-ed out
 DROPOUT_MASK = np.array([1, 1, 1, 1, 1, 1, 1, 1])   # valid observation indices to apply dropout on
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 RANDOM_SEED = 0
-TRAIN_NEW_GRU_POLICY = True
+TRAIN_NEW_GRU_POLICY = False
 TRAIN_NEW_MLP_POLICY = True
 TRAIN_NEW_EXPERT_POLICY = True
 np.random.seed(RANDOM_SEED)
@@ -251,7 +251,7 @@ def evaluate_policy(env, policy_fn, episodes=10, silent=False, visualize=False, 
             if isinstance(policy_fn, PPO):
                 action, _ = policy_fn.predict(obs)
             elif isinstance(policy_fn, MLPPolicy):
-                action = policy_fn(torch.FloatTensor(obs))
+                action = policy_fn(torch.FloatTensor(obs).to(DEVICE))
             else:
                 obs_tensor = torch.FloatTensor(obs).unsqueeze(0).to(DEVICE)
                 if hidden_state is None:
