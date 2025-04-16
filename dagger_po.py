@@ -19,6 +19,7 @@ DROPOUT_RATE = 0.0  # probability with which observations are zero-ed out
 DROPOUT_MASK = np.array([1, 1, 1, 1, 1, 1, 1, 1])   # valid observation indices to apply dropout on
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 RANDOM_SEED = 0
+TRAIN_NEW_POLICY = True
 np.random.seed(RANDOM_SEED)
 torch.manual_seed(RANDOM_SEED)
 torch.cuda.manual_seed(RANDOM_SEED)
@@ -63,6 +64,19 @@ class GRUPolicy(nn.Module):
         x, hidden = self.gru(x, hidden)
         x = self.fc(x)
         return x, hidden
+
+class MLPPolicy(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super().__init__()
+        self.fc1 = nn.Linear(input_dim, 128)
+        self.fc2 = nn.Linear(128, 64)
+        self.fc3 = nn.Linear(64, output_dim)
+
+    def forward(self, x):
+        x = torch.relu(self.fc1(x))
+        x = torch.relu(self.fc2(x))
+        return self.fc3(x)
+
 
 def train_ppo_expert(env_id="LunarLander-v2", total_timesteps=200_000):
     """Train the PPO expert or load if already exists"""
@@ -147,6 +161,75 @@ def train_dagger(env, expert, epochs=TOTAL_EPOCHS):
 
     return policy
 
+
+def train_dagger_baseline(env, expert, epochs=TOTAL_EPOCHS):
+    """Train DAgger to imitate the expert"""
+
+    policy = MLPPolicy(env.observation_space.shape[0], env.action_space.n).to(DEVICE)
+    optimizer = optim.Adam(policy.parameters(), lr=1e-4)
+    dataset = [] 
+    loss_history = []   
+    return_history = []
+
+    obs, _ = env.reset()
+    done = False
+    hidden = torch.zeros(1, HIDDEN_SIZE).to(DEVICE)
+
+    # seed intial dataset with high quality expert actions
+    for _ in range(1000):
+        action, _ = expert.predict(obs)
+        dataset.append((obs, action))
+        obs, _, done, _, _ = env.step(action)
+        if done:
+            obs, _ = env.reset()
+    
+    # main DAgger training loop
+    for epoch in range(epochs):
+        total_loss = 0.0    # for logging and plotting
+
+        # run multiple updates steps per epoch    
+        for _ in range(UPDATE_STEPS):
+            batch_indices = np.random.choice(len(dataset), BATCH_SIZE, replace=False)
+            obs_batch = torch.tensor(np.array([dataset[i][0] for i in batch_indices]), dtype=torch.float32).to(DEVICE)
+            act_batch = torch.tensor(np.array([dataset[i][1] for i in batch_indices]), dtype=torch.long).to(DEVICE)
+
+            obs_batch = obs_batch
+            pred_actions, _ = policy(obs_batch)
+            loss = nn.CrossEntropyLoss()(pred_actions, act_batch)
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
+
+        loss_history.append(total_loss / UPDATE_STEPS)
+
+        # collect transitions for DAgger dataset
+        obs, _ = env.reset()
+        done = False
+        timesteps = 0
+        while not done and timesteps < EPISODE_LENGTH:
+            obs_tensor = torch.FloatTensor(obs).to(DEVICE)
+            with torch.no_grad():
+                policy_act = policy(obs_tensor)
+                action = policy_act.squeeze(0).argmax().item()
+
+            expert_act, _ = expert.predict(obs)
+            dataset.append((obs, expert_act))
+            obs, _, done, _, _ = env.step(action)
+            timesteps += 1
+
+        ret = np.mean(evaluate_policy(env, policy, episodes=5, silent=True))
+        return_history.append(ret)
+        print(f"Epoch {epoch+1} | Loss: {loss_history[-1]:.4f} | Avg Return: {ret:.2f}")
+
+    # plot loss and returns
+    plot_training_stats(loss_history, return_history)
+
+    return policy
+
+
+
 def evaluate_policy(env, policy_fn, episodes=10, silent=False, visualize=False, n_episodes=3, gif_filename='lunarlander.gif'):
     """Evalaute the policy, optionally render to gif"""
 
@@ -162,6 +245,8 @@ def evaluate_policy(env, policy_fn, episodes=10, silent=False, visualize=False, 
         while not done and timesteps < EPISODE_LENGTH:
             if isinstance(policy_fn, PPO):
                 action, _ = policy_fn.predict(obs)
+            elif isinstance(policy_fn, MLPPolicy):
+                action = policy_fn(obs)
             else:
                 obs_tensor = torch.FloatTensor(obs).unsqueeze(0).to(DEVICE)
                 if hidden_state is None:
@@ -202,23 +287,20 @@ def plot_training_stats(loss_history, return_history):
     axs[1].set_ylabel("Return")
     axs[1].set_xlabel("Epoch")
     axs[1].legend()
-    print('*' * 20)
+
 
     plt.suptitle("DAgger Training Progress")
     plt.tight_layout()
     plt.savefig('dagger_training_progress.png')
     plt.close()
 
-def plot_returns(expert_returns, dagger_returns):
+def plot_returns(expert_returns, dagger_returns, dagger_baseline_returns):
     """Compare DAgger policy performance to expert"""
 
-
-    np.save('expert_returns.npy', expert_returns)
-    np.save('dagger_returns.npy', dagger_returns)
-
-    # plt.figure(figsize=(10, 6))
+    plt.figure(figsize=(10, 6))
     plt.plot(expert_returns, label="PPO Expert", color="blue", linestyle="--")
     plt.plot(dagger_returns, label="DAgger policy", color="green")
+    plt.plot(dagger_baseline_returns, label="DAgger policy (baseline)", color="yellow")
     plt.xlabel("Episode")
     plt.ylabel("Return")
     plt.title("Returns Comparison: PPO Expert vs DAgger policy")
@@ -232,16 +314,33 @@ if __name__ == "__main__":
     print("Training PPO Expert...")
     expert_model = train_ppo_expert()
 
-    # print("Training DAgger policy...")
-    # dagger_model = train_dagger(wrapped_env, expert_model)
+    if TRAIN_NEW_POLICY:
 
-    # print("Saving DAgger policy...")
-    # save_path = "dagger_lunarlander_gru.pt"
-    # torch.save(dagger_model.state_dict(), save_path)
 
-    print("Loading DAgger policy")
-    dagger_model = GRUPolicy(env.observation_space.shape[0], env.action_space.n).to(DEVICE)
-    dagger_model.load_state_dict(torch.load('dagger_lunarlander_gru.pt', map_location=DEVICE))
+        print("Training DAgger policy...")
+        dagger_model = train_dagger(wrapped_env, expert_model)
+
+        print("Saving DAgger policy...")
+        save_path = "dagger_lunarlander_gru.pt"
+        torch.save(dagger_model.state_dict(), save_path)
+
+        print("Training DAgger policy (MLP)...")
+        dagger_model_baseline = train_dagger_baseline(wrapped_env, expert_model)
+
+        print("Saving DAgger policy (MLP)...")
+        save_path = "dagger_lunarlander_mlp.pt"
+        torch.save(dagger_model_baseline.state_dict(), save_path)
+
+        
+    
+    else:
+        print("Loading DAgger policy")
+        dagger_model = GRUPolicy(env.observation_space.shape[0], env.action_space.n).to(DEVICE)
+        dagger_model.load_state_dict(torch.load('dagger_lunarlander_gru.pt', map_location=DEVICE))
+
+        print("Loading DAgger policy (baseline)")
+        dagger_model_baseline = MLPPolicy(env.observation_space.shape[0], env.action_space.n).to(DEVICE)
+        dagger_model_baseline.load_state_dict(torch.load('dagger_lunarlander_mlp.pt', map_location=DEVICE))
 
     print("Evaluating PPO Expert...")
     expert_returns = evaluate_policy(
@@ -261,5 +360,19 @@ if __name__ == "__main__":
         gif_filename='dagger_policy.gif'
     )
 
+    print("Evaluating DAgger policy (baseline)...")
+    dagger_baseline_returns = evaluate_policy(
+        EnvWrapper(gym.make("LunarLander-v2", render_mode="rgb_array"), DROPOUT_RATE, DROPOUT_MASK),
+        dagger_model_baseline,
+        episodes=50,
+        visualize=True,
+        gif_filename='dagger_policy_baseline.gif'
+    )
+
+    print("Saving results")
+    np.save('expert_returns.npy', expert_returns)
+    np.save('dagger_returns.npy', dagger_returns)
+    np.save('dagger_baseline_returns.npy', dagger_baseline_returns)
+
     print("Plotting final results...")
-    plot_returns(expert_returns, dagger_returns)
+    plot_returns(expert_returns, dagger_returns, dagger_baseline_returns)
