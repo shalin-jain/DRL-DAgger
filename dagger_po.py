@@ -15,17 +15,18 @@ BATCH_SIZE = 64
 UPDATE_STEPS = 5
 TOTAL_EPOCHS = 250
 EPISODE_LENGTH = 500
-DROPOUT_RATE = 0.0  # probability with which observations are zero-ed out
+DROPOUT_RATE = 0  # probability with which observations are zero-ed out
 DROPOUT_MASK = np.array([1, 1, 1, 1, 1, 1, 1, 1])   # valid observation indices to apply dropout on
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 RANDOM_SEED = 0
-TRAIN_NEW_GRU_POLICY = False
+
+SAVE_ROOT = None
+
+TRAIN_NEW_GRU_POLICY = True
 TRAIN_NEW_MLP_POLICY = True
 TRAIN_NEW_EXPERT_POLICY = True
-np.random.seed(RANDOM_SEED)
-torch.manual_seed(RANDOM_SEED)
-torch.cuda.manual_seed(RANDOM_SEED)
-torch.cuda.manual_seed_all(RANDOM_SEED)
+
 
 
 class EnvWrapper():
@@ -298,7 +299,7 @@ def plot_training_stats(loss_history, return_history):
 
     plt.suptitle("DAgger Training Progress")
     plt.tight_layout()
-    plt.savefig('dagger_training_progress.png')
+    plt.savefig(os.path.join(SAVE_ROOT, 'dagger_training_progress.png'))
     plt.close()
 
 def plot_returns(expert_returns, dagger_returns, dagger_baseline_returns):
@@ -310,76 +311,87 @@ def plot_returns(expert_returns, dagger_returns, dagger_baseline_returns):
     plt.plot(dagger_baseline_returns, label="DAgger policy (baseline)", color="yellow")
     plt.xlabel("Episode")
     plt.ylabel("Return")
+    plt.grid()
     plt.title("Returns Comparison: PPO Expert vs DAgger policy")
     plt.legend()
-    plt.savefig('dagger_final_comparison.png')
+    plt.savefig(os.path.join(SAVE_ROOT, 'dagger_final_comparison.png'))
 
 if __name__ == "__main__":
-    env = gym.make("LunarLander-v2")
-    wrapped_env = EnvWrapper(env, DROPOUT_RATE, DROPOUT_MASK)
-    
-    print("Training PPO Expert...")
-    expert_model = train_ppo_expert()
+    for exp in range(5):
+        RANDOM_SEED = exp
+        np.random.seed(RANDOM_SEED)
+        torch.manual_seed(RANDOM_SEED)
+        torch.cuda.manual_seed(RANDOM_SEED)
+        torch.cuda.manual_seed_all(RANDOM_SEED)
+        env = gym.make("LunarLander-v2")
+        wrapped_env = EnvWrapper(env, DROPOUT_RATE, DROPOUT_MASK)
 
-    if TRAIN_NEW_GRU_POLICY:
+        SAVE_ROOT = os.path.join('dropout_{x}'.format(x=DROPOUT_RATE), 'seed{x}'.format(x=RANDOM_SEED))
+        if not os.path.exists(SAVE_ROOT):
+            os.makedirs(SAVE_ROOT)
+        
+        print("Training PPO Expert...")
+        expert_model = train_ppo_expert()
 
-        print("Training DAgger policy...")
-        dagger_model = train_dagger(wrapped_env, expert_model)
+        if TRAIN_NEW_GRU_POLICY:
 
-        print("Saving DAgger policy...")
-        save_path = "dagger_lunarlander_gru.pt"
-        torch.save(dagger_model.state_dict(), save_path)
-    else:
-        print("Loading DAgger policy")
-        dagger_model = GRUPolicy(env.observation_space.shape[0], env.action_space.n).to(DEVICE)
-        dagger_model.load_state_dict(torch.load('dagger_lunarlander_gru.pt', map_location=DEVICE))
+            print("Training DAgger policy...")
+            dagger_model = train_dagger(wrapped_env, expert_model)
 
-    
-    if TRAIN_NEW_MLP_POLICY:
+            print("Saving DAgger policy...")
+            save_path = os.path.join(SAVE_ROOT, "dagger_lunarlander_gru.pt")
+            torch.save(dagger_model.state_dict(), save_path)
+        else:
+            print("Loading DAgger policy")
+            dagger_model = GRUPolicy(env.observation_space.shape[0], env.action_space.n).to(DEVICE)
+            dagger_model.load_state_dict(torch.load(os.path.join(SAVE_ROOT, 'dagger_lunarlander_gru.pt'), map_location=DEVICE))
 
-        print("Training DAgger policy (MLP)...")
-        dagger_model_baseline = train_dagger_baseline(wrapped_env, expert_model)
+        
+        if TRAIN_NEW_MLP_POLICY:
 
-        print("Saving DAgger policy (MLP)...")
-        save_path = "dagger_lunarlander_mlp.pt"
-        torch.save(dagger_model_baseline.state_dict(), save_path)
+            print("Training DAgger policy (MLP)...")
+            dagger_model_baseline = train_dagger_baseline(wrapped_env, expert_model)
 
-    else:
-        print("Loading DAgger policy (baseline)")
-        dagger_model_baseline = MLPPolicy(env.observation_space.shape[0], env.action_space.n).to(DEVICE)
-        dagger_model_baseline.load_state_dict(torch.load('dagger_lunarlander_mlp.pt', map_location=DEVICE))
+            print("Saving DAgger policy (MLP)...")
+            save_path = os.path.join(SAVE_ROOT, "dagger_lunarlander_mlp.pt")
+            torch.save(dagger_model_baseline.state_dict(), save_path)
 
-    print("Evaluating PPO Expert...")
-    expert_returns = evaluate_policy(
-        gym.make("LunarLander-v2", render_mode="rgb_array"),
-        expert_model,
-        episodes=50,
-        visualize=True,
-        gif_filename='expert_policy.gif'
-    )
+        else:
+            print("Loading DAgger policy (baseline)")
+            dagger_model_baseline = MLPPolicy(env.observation_space.shape[0], env.action_space.n).to(DEVICE)
+            dagger_model_baseline.load_state_dict(torch.load(os.path.join(SAVE_ROOT, 'dagger_lunarlander_mlp.pt'), map_location=DEVICE))
 
-    print("Evaluating DAgger policy...")
-    dagger_returns = evaluate_policy(
-        EnvWrapper(gym.make("LunarLander-v2", render_mode="rgb_array"), DROPOUT_RATE, DROPOUT_MASK),
-        dagger_model,
-        episodes=50,
-        visualize=True,
-        gif_filename='dagger_policy.gif'
-    )
+        print("Evaluating PPO Expert...")
+        expert_returns = evaluate_policy(
+            gym.make("LunarLander-v2", render_mode="rgb_array"),
+            expert_model,
+            episodes=50,
+            visualize=True,
+            gif_filename=os.path.join(SAVE_ROOT, 'expert_policy.gif')
+        )
 
-    print("Evaluating DAgger policy (baseline)...")
-    dagger_baseline_returns = evaluate_policy(
-        EnvWrapper(gym.make("LunarLander-v2", render_mode="rgb_array"), DROPOUT_RATE, DROPOUT_MASK),
-        dagger_model_baseline,
-        episodes=50,
-        visualize=True,
-        gif_filename='dagger_policy_baseline.gif'
-    )
+        print("Evaluating DAgger policy...")
+        dagger_returns = evaluate_policy(
+            EnvWrapper(gym.make("LunarLander-v2", render_mode="rgb_array"), DROPOUT_RATE, DROPOUT_MASK),
+            dagger_model,
+            episodes=50,
+            visualize=True,
+            gif_filename=os.path.join(SAVE_ROOT, 'dagger_policy.gif')
+        )
 
-    print("Saving results")
-    np.save('expert_returns.npy', expert_returns)
-    np.save('dagger_returns.npy', dagger_returns)
-    np.save('dagger_baseline_returns.npy', dagger_baseline_returns)
+        print("Evaluating DAgger policy (baseline)...")
+        dagger_baseline_returns = evaluate_policy(
+            EnvWrapper(gym.make("LunarLander-v2", render_mode="rgb_array"), DROPOUT_RATE, DROPOUT_MASK),
+            dagger_model_baseline,
+            episodes=50,
+            visualize=True,
+            gif_filename=os.path.join(SAVE_ROOT, 'dagger_policy_baseline.gif')
+        )
 
-    print("Plotting final results...")
-    plot_returns(expert_returns, dagger_returns, dagger_baseline_returns)
+        print("Saving results")
+        np.save(os.path.join(SAVE_ROOT, 'expert_returns.npy'), expert_returns)
+        np.save(os.path.join(SAVE_ROOT, 'dagger_returns.npy'), dagger_returns)
+        np.save(os.path.join(SAVE_ROOT, 'dagger_baseline_returns.npy'), dagger_baseline_returns)
+
+        print("Plotting final results...")
+        plot_returns(expert_returns, dagger_returns, dagger_baseline_returns)
