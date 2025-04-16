@@ -251,7 +251,7 @@ def evaluate_policy(env, policy_fn, episodes=10, silent=False, visualize=False, 
             if isinstance(policy_fn, PPO):
                 action, _ = policy_fn.predict(obs)
             elif isinstance(policy_fn, MLPPolicy):
-                action = policy_fn(obs)
+                action = policy_fn(torch.FloatTensor(obs))
             else:
                 obs_tensor = torch.FloatTensor(obs).unsqueeze(0).to(DEVICE)
                 if hidden_state is None:
