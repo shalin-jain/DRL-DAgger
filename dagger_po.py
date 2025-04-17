@@ -40,7 +40,14 @@ class EnvWrapper():
         self.action_space = env.action_space
 
     def reset(self):
-        return self.env.reset()
+        obs, info = self.env.reset()
+
+        # apply observation dropout
+        p = np.random.uniform(size=obs.shape[0])
+        p = np.where(self.dropout_mask == 1, p, 0)
+        obs_partial = np.where(p < self.dropout_rate, 0, obs)
+        
+        return (obs, obs_partial), info
     
     def render(self):
         return self.env.render()
@@ -51,9 +58,9 @@ class EnvWrapper():
         # apply observation dropout
         p = np.random.uniform(size=obs.shape[0])
         p = np.where(self.dropout_mask == 1, p, 0)
-        obs = np.where(p < self.dropout_rate, 0, obs)
+        obs_partial = np.where(p < self.dropout_rate, 0, obs)
 
-        return obs, reward, done, truncated, info
+        return (obs, obs_partial), reward, done, truncated, info
 
 class GRUPolicy(nn.Module):
     """GRU followed by FC"""
@@ -107,17 +114,17 @@ def train_dagger(env, expert, epochs=TOTAL_EPOCHS):
     loss_history = []   
     return_history = []
 
-    obs, _ = env.reset()
+    (obs, obs_partial), _ = env.reset()
     done = False
     hidden = torch.zeros(1, HIDDEN_SIZE).to(DEVICE)
 
     # seed intial dataset with high quality expert actions
     for _ in range(1000):
         action, _ = expert.predict(obs)
-        dataset.append((obs, action, hidden.clone()))
-        obs, _, done, _, _ = env.step(action)
+        dataset.append((obs_partial, action, hidden.clone()))
+        (obs, obs_partial), _, done, _, _ = env.step(action)
         if done:
-            obs, _ = env.reset()
+            (obs, obs_partial), _ = env.reset()
     
     # main DAgger training loop
     for epoch in range(epochs):
@@ -142,20 +149,20 @@ def train_dagger(env, expert, epochs=TOTAL_EPOCHS):
         loss_history.append(total_loss / UPDATE_STEPS)
 
         # collect transitions for DAgger dataset
-        obs, _ = env.reset()
+        (obs, obs_partial), _ = env.reset()
         done = False
         hidden = torch.zeros(1, HIDDEN_SIZE).to(DEVICE)
         timesteps = 0
         while not done and timesteps < EPISODE_LENGTH:
             prev_hidden = hidden.clone()
-            obs_tensor = torch.FloatTensor(obs).to(DEVICE)
+            obs_tensor = torch.FloatTensor(obs_partial).to(DEVICE)
             with torch.no_grad():
                 policy_act, hidden = policy(obs_tensor.unsqueeze(0), hidden)
                 action = policy_act.squeeze(0).argmax().item()
 
             expert_act, _ = expert.predict(obs)
-            dataset.append((obs, expert_act, prev_hidden.detach().clone()))
-            obs, _, done, _, _ = env.step(action)
+            dataset.append((obs_partial, expert_act, prev_hidden.detach().clone()))
+            (obs, obs_partial), _, done, _, _ = env.step(action)
             timesteps += 1
 
         ret = np.mean(evaluate_policy(env, policy, episodes=5, silent=True))
@@ -177,17 +184,17 @@ def train_dagger_baseline(env, expert, epochs=TOTAL_EPOCHS):
     loss_history = []   
     return_history = []
 
-    obs, _ = env.reset()
+    (obs, obs_partial), _ = env.reset()
     done = False
     hidden = torch.zeros(1, HIDDEN_SIZE).to(DEVICE)
 
     # seed intial dataset with high quality expert actions
     for _ in range(1000):
         action, _ = expert.predict(obs)
-        dataset.append((obs, action))
-        obs, _, done, _, _ = env.step(action)
+        dataset.append((obs_partial, action))
+        (obs, obs_partial), _, done, _, _ = env.step(action)
         if done:
-            obs, _ = env.reset()
+            (obs, obs_partial), _ = env.reset()
     
     # main DAgger training loop
     for epoch in range(epochs):
@@ -211,18 +218,18 @@ def train_dagger_baseline(env, expert, epochs=TOTAL_EPOCHS):
         loss_history.append(total_loss / UPDATE_STEPS)
 
         # collect transitions for DAgger dataset
-        obs, _ = env.reset()
+        (obs, obs_partial), _ = env.reset()
         done = False
         timesteps = 0
         while not done and timesteps < EPISODE_LENGTH:
-            obs_tensor = torch.FloatTensor(obs).to(DEVICE)
+            obs_tensor = torch.FloatTensor(obs_partial).to(DEVICE)
             with torch.no_grad():
                 policy_act = policy(obs_tensor)
                 action = policy_act.squeeze(0).argmax().item()
 
             expert_act, _ = expert.predict(obs)
-            dataset.append((obs, expert_act))
-            obs, _, done, _, _ = env.step(action)
+            dataset.append((obs_partial, expert_act))
+            (obs, obs_partial), _, done, _, _ = env.step(action)
             timesteps += 1
 
         ret = np.mean(evaluate_policy(env, policy, episodes=5, silent=True))
@@ -242,7 +249,10 @@ def evaluate_policy(env, policy_fn, episodes=10, silent=False, visualize=False, 
     returns = []
     frames = []
     for i in range(episodes):
-        obs, _ = env.reset()
+        if isinstance(env, EnvWrapper):
+            (obs, obs_partial), _ = env.reset()
+        else:
+            obs, _ = env.reset()
         done = False
         total_reward = 0
         hidden_state = None
@@ -252,18 +262,21 @@ def evaluate_policy(env, policy_fn, episodes=10, silent=False, visualize=False, 
             if isinstance(policy_fn, PPO):
                 action, _ = policy_fn.predict(obs)
             elif isinstance(policy_fn, MLPPolicy):
-                obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(DEVICE)
+                obs_tensor = torch.tensor(obs_partial, dtype=torch.float32).unsqueeze(0).to(DEVICE)
                 logits = policy_fn(obs_tensor)
                 action = torch.argmax(logits, dim=1).item()
             else:
-                obs_tensor = torch.FloatTensor(obs).unsqueeze(0).to(DEVICE)
+                obs_tensor = torch.FloatTensor(obs_partial).unsqueeze(0).to(DEVICE)
                 if hidden_state is None:
                     hidden_state = torch.zeros(1, 1, HIDDEN_SIZE).to(DEVICE)
                 with torch.no_grad():
                     action_logits, hidden_state = policy_fn(obs_tensor.unsqueeze(0), hidden_state)
                     action = action_logits.squeeze(0).argmax().item()
 
-            obs, reward, done, _, _ = env.step(action)
+            if isinstance(env, EnvWrapper):
+                (obs, obs_partial), reward, done, _, _ = env.step(action)
+            else:
+                obs, reward, done, _, _ = env.step(action)
             total_reward += reward
             timesteps += 1
 
