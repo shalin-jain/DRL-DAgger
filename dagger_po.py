@@ -15,7 +15,7 @@ BATCH_SIZE = 64
 UPDATE_STEPS = 5
 TOTAL_EPOCHS = 250
 EPISODE_LENGTH = 500
-DROPOUT_RATE = 0  # probability with which observations are zero-ed out
+DROPOUT_RATE = 0.7  # probability with which observations are zero-ed out
 DROPOUT_MASK = np.array([1, 1, 1, 1, 1, 1, 1, 1])   # valid observation indices to apply dropout on
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
