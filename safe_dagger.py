@@ -635,7 +635,7 @@ if __name__ == "__main__":
     POLICY_LR = 5e-4
     SAFETY_LR = 5e-4
     UPDATE_STEPS = 10
-    SAFETY_THRESHOLD = 0.0
+    SAFETY_THRESHOLD = 0.5
     EVAL_EPISODES = 50
     VIS_EPISODES = 0
 
