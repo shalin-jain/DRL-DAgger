@@ -36,6 +36,7 @@ class EnvWrapper():
     def render(self):
         return self.env.render()
 
+
     def step(self, action):
         obs, reward, done, truncated, info = self.env.step(action)
 
@@ -55,6 +56,7 @@ class LSTMPolicy(nn.Module):
         self.lstm = nn.LSTM(input_size, HIDDEN_SIZE)
         self.fc = nn.Linear(HIDDEN_SIZE, action_size)
 
+
     def forward(self, x, hidden):
         x, hidden = self.lstm(x, hidden)
         x = self.fc(x)
@@ -71,6 +73,7 @@ def train_ppo_expert(env_id="LunarLander-v2", total_timesteps=200_000):
 
     save_path = "ppo_expert.zip"
 
+
     if os.path.exists(save_path):
         return PPO.load(save_path)
 
@@ -81,11 +84,14 @@ def train_ppo_expert(env_id="LunarLander-v2", total_timesteps=200_000):
     return model
 
 
+
 def train_dagger(env, expert, epochs=TOTAL_EPOCHS):
     """Train DAgger to imitate the expert"""
 
     policy = LSTMPolicy(env.observation_space.shape[0], env.action_space.n).to(DEVICE)
     optimizer = optim.Adam(policy.parameters(), lr=1e-4)
+    dataset = []
+    loss_history = []
     dataset = []
     loss_history = []
     return_history = []
@@ -106,7 +112,9 @@ def train_dagger(env, expert, epochs=TOTAL_EPOCHS):
     # main DAgger training loop
     for epoch in range(epochs):
         total_loss = 0.0  # for logging and plotting
+        total_loss = 0.0  # for logging and plotting
 
+        # run multiple updates steps per epoch
         # run multiple updates steps per epoch
         for _ in range(UPDATE_STEPS):
             batch_indices = np.random.choice(len(dataset), BATCH_SIZE, replace=False)
